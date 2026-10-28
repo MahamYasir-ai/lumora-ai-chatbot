@@ -1,0 +1,6 @@
+{
+  "name": "Lumora AI - Futuristic AI Chatbot",
+  "description": "A modern, responsive AI chatbot workspace powered by Gemini with streaming responses, multi-turn conversations, syntax highlighting, and local persistence.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
