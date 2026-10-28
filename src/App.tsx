@@ -6,6 +6,12 @@ import {
   Sparkles,
   Bot,
   SlidersHorizontal,
+  Zap,
+  LogIn,
+  User,
+  Check,
+  ChevronDown,
+  ShieldAlert,
 } from 'lucide-react';
 import { Sidebar } from './components/sidebar/Sidebar';
 import { WelcomeScreen } from './components/chat/WelcomeScreen';
@@ -14,6 +20,8 @@ import { ChatComposer } from './components/chat/ChatComposer';
 import { SettingsModal } from './components/settings/SettingsModal';
 import { ConfirmDialog } from './components/chat/ConfirmDialog';
 import { ToastContainer } from './components/ui/Toast';
+import { AuthModal } from './components/auth/AuthModal';
+import { ProModal } from './components/auth/ProModal';
 import { BRAND } from './config/brand';
 import {
   ChatMessage as ChatMessageType,
@@ -21,6 +29,7 @@ import {
   UserSettings,
   ToastMessage,
 } from './types/chat';
+import { AuthState, UserAccount } from './types/auth';
 import {
   loadStoredConversations,
   saveStoredConversations,
@@ -29,6 +38,7 @@ import {
   clearAllStoredConversations,
   generateTitleFromMessage,
 } from './utils/storage';
+import { loadStoredAuth, saveStoredAuth, DEFAULT_GUEST_STATE } from './utils/authStorage';
 import { sendChatStream } from './services/chatApi';
 
 export default function App() {
@@ -36,6 +46,7 @@ export default function App() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [settings, setSettings] = useState<UserSettings>(loadStoredSettings);
+  const [authState, setAuthState] = useState<AuthState>(DEFAULT_GUEST_STATE);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
 
   // UI state
@@ -44,6 +55,9 @@ export default function App() {
   const [sidebarOpenDesktop, setSidebarOpenDesktop] = useState(true);
   const [sidebarOpenMobile, setSidebarOpenMobile] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [proModalOpen, setProModalOpen] = useState(false);
+  const [modelDropdownOpen, setModelDropdownOpen] = useState(false);
   const [showScrollBottom, setShowScrollBottom] = useState(false);
 
   // Dialog state
@@ -57,14 +71,17 @@ export default function App() {
 
   // 1. Initial Load from LocalStorage
   useEffect(() => {
-    const stored = loadStoredConversations();
-    setConversations(stored);
-    if (stored.length > 0) {
-      setActiveConversationId(stored[0].id);
+    const storedConvs = loadStoredConversations();
+    setConversations(storedConvs);
+    if (storedConvs.length > 0) {
+      setActiveConversationId(storedConvs[0].id);
     }
     const initialSettings = loadStoredSettings();
     setSettings(initialSettings);
     setSidebarOpenDesktop(initialSettings.sidebarOpenDesktop);
+
+    const initialAuth = loadStoredAuth();
+    setAuthState(initialAuth);
   }, []);
 
   // 2. Synchronize theme class on root
@@ -96,7 +113,67 @@ export default function App() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // Scroll handler for auto-scroll vs scroll-to-bottom button
+  // Auth Handlers
+  const handleLoginSuccess = (account: UserAccount) => {
+    const nextAuth: AuthState = { isLoggedIn: true, user: account };
+    setAuthState(nextAuth);
+    saveStoredAuth(nextAuth);
+
+    // If account is Pro, enable Pro model
+    if (account.tier === 'pro') {
+      const nextSettings = { ...settings, model: 'gemini-3.8-flash' };
+      setSettings(nextSettings);
+      saveStoredSettings(nextSettings);
+    }
+
+    addToast('success', `Welcome, ${account.name}! Session established.`);
+  };
+
+  const handleStayLoggedOut = () => {
+    setAuthState(DEFAULT_GUEST_STATE);
+    saveStoredAuth(DEFAULT_GUEST_STATE);
+    addToast('info', 'Browsing in Guest Mode (Stayed Logged Out). Chats persist locally.');
+  };
+
+  const handleLogout = () => {
+    setAuthState(DEFAULT_GUEST_STATE);
+    saveStoredAuth(DEFAULT_GUEST_STATE);
+    // Switch to free model
+    const nextSettings = { ...settings, model: 'gemini-3.1-flash-lite' };
+    setSettings(nextSettings);
+    saveStoredSettings(nextSettings);
+    addToast('info', 'Logged out. Now in Guest Mode.');
+  };
+
+  const handleActivatePro = () => {
+    if (authState.isLoggedIn && authState.user) {
+      const updatedUser: UserAccount = { ...authState.user, tier: 'pro' };
+      const nextAuth = { isLoggedIn: true, user: updatedUser };
+      setAuthState(nextAuth);
+      saveStoredAuth(nextAuth);
+    }
+    const nextSettings = { ...settings, model: 'gemini-3.8-flash' };
+    setSettings(nextSettings);
+    saveStoredSettings(nextSettings);
+    addToast('success', 'Gemini 3.8 Flash Neural (PRO) Activated!');
+  };
+
+  const handleSelectModel = (modelId: string) => {
+    setModelDropdownOpen(false);
+    if (modelId === 'gemini-3.8-flash') {
+      const isUserPro = authState.isLoggedIn && authState.user?.tier === 'pro';
+      if (!isUserPro) {
+        setProModalOpen(true);
+        return;
+      }
+    }
+    const nextSettings = { ...settings, model: modelId };
+    setSettings(nextSettings);
+    saveStoredSettings(nextSettings);
+    addToast('info', `Switched to ${modelId === 'gemini-3.8-flash' ? 'Gemini 3.8 Flash (PRO)' : 'Gemini 3.1 Flash Lite (FREE)'}`);
+  };
+
+  // Scroll handler
   const handleScroll = () => {
     const container = chatScrollRef.current;
     if (!container) return;
@@ -119,23 +196,19 @@ export default function App() {
     }
   };
 
-  // Active conversation helper
   const currentConversation = conversations.find((c) => c.id === activeConversationId) || null;
 
-  // Save conversations to localStorage whenever they change
   const updateConversations = (newConvs: Conversation[]) => {
     setConversations(newConvs);
     saveStoredConversations(newConvs);
   };
 
-  // Save Settings
   const handleSaveSettings = (newSettings: UserSettings) => {
     setSettings(newSettings);
     saveStoredSettings(newSettings);
-    addToast('success', 'Settings updated successfully');
+    addToast('success', 'Preferences updated');
   };
 
-  // 3. New Chat
   const handleNewChat = () => {
     if (isGenerating) {
       handleStopGeneration();
@@ -144,7 +217,6 @@ export default function App() {
     setInput('');
   };
 
-  // 4. Rename Conversation
   const handleRenameConversation = (id: string, newTitle: string) => {
     const updated = conversations.map((c) =>
       c.id === id ? { ...c, title: newTitle, updatedAt: Date.now() } : c
@@ -153,7 +225,6 @@ export default function App() {
     addToast('info', 'Chat renamed');
   };
 
-  // 5. Delete Single Conversation
   const handleConfirmDeleteConversation = () => {
     if (!confirmDeleteId) return;
     const updated = conversations.filter((c) => c.id !== confirmDeleteId);
@@ -170,7 +241,6 @@ export default function App() {
     addToast('info', 'Conversation deleted');
   };
 
-  // 6. Clear All History
   const handleConfirmClearAll = () => {
     clearAllStoredConversations();
     setConversations([]);
@@ -179,7 +249,6 @@ export default function App() {
     addToast('info', 'All conversation history cleared');
   };
 
-  // 7. Stop Generation
   const handleStopGeneration = () => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -187,7 +256,6 @@ export default function App() {
     }
     setIsGenerating(false);
 
-    // Turn off streaming on any active message
     if (activeConversationId) {
       setConversations((prev) =>
         prev.map((c) => {
@@ -200,7 +268,7 @@ export default function App() {
     addToast('info', 'Generation stopped');
   };
 
-  // 8. Core Message Sender with Gemini Streaming
+  // Message Sender
   const handleSendMessage = async (textToSend?: string) => {
     const messageContent = (textToSend !== undefined ? textToSend : input).trim();
     if (!messageContent || isGenerating) return;
@@ -224,9 +292,9 @@ export default function App() {
       content: '',
       timestamp: now + 1,
       isStreaming: true,
+      modelUsed: settings.model,
     };
 
-    // If no active conversation, create a fresh one!
     if (!convId || !conversations.some((c) => c.id === convId)) {
       convId = 'conv_' + now;
       const title = generateTitleFromMessage(messageContent);
@@ -242,12 +310,12 @@ export default function App() {
       updateConversations(updatedList);
       setActiveConversationId(convId);
     } else {
-      // Append to current conversation
       const current = conversations.find((c) => c.id === convId)!;
       targetConversation = {
         ...current,
         messages: [...current.messages, userMessage, assistantPlaceholder],
         updatedAt: now,
+        model: settings.model,
       };
       const updatedList = [
         targetConversation,
@@ -259,10 +327,8 @@ export default function App() {
     setIsGenerating(true);
     abortControllerRef.current = new AbortController();
 
-    // Scroll to bottom immediately on send
     setTimeout(() => scrollToBottom('smooth'), 50);
 
-    // Prepare message history to send to Gemini
     const apiMessages = targetConversation.messages
       .filter((m) => m.id !== assistantPlaceholder.id)
       .map((m) => ({
@@ -298,7 +364,6 @@ export default function App() {
           return updated;
         });
 
-        // Auto-scroll if user has not scrolled up
         if (!isUserScrolledUpRef.current) {
           scrollToBottom('auto');
         }
@@ -352,25 +417,23 @@ export default function App() {
     });
   };
 
-  // 9. Regenerate last message
+  // Regenerate
   const handleRegenerate = async () => {
     if (!currentConversation || isGenerating) return;
     const messages = currentConversation.messages;
     if (messages.length < 2) return;
 
-    // Find the last assistant message
     const lastMsg = messages[messages.length - 1];
     if (lastMsg.role !== 'assistant') return;
 
     const assistantId = lastMsg.id;
     const historyBeforeAssistant = messages.slice(0, messages.length - 1);
 
-    // Reset last assistant message content and mark isStreaming
     setConversations((prev) =>
       prev.map((c) => {
         if (c.id !== currentConversation.id) return c;
         const updatedMessages = c.messages.map((m) =>
-          m.id === assistantId ? { ...m, content: '', isStreaming: true, error: undefined } : m
+          m.id === assistantId ? { ...m, content: '', isStreaming: true, error: undefined, modelUsed: settings.model } : m
         );
         return { ...c, messages: updatedMessages, updatedAt: Date.now() };
       })
@@ -444,11 +507,10 @@ export default function App() {
     });
   };
 
-  // 10. Edit and resend user message
+  // Edit and resend
   const handleEditAndResend = async (messageIndex: number, newContent: string) => {
     if (!currentConversation || isGenerating) return;
 
-    // Truncate conversation to this user message index
     const messagesUpToEdit = currentConversation.messages.slice(0, messageIndex);
     const now = Date.now();
     const updatedUserMsg: ChatMessageType = {
@@ -463,6 +525,7 @@ export default function App() {
       content: '',
       timestamp: now + 1,
       isStreaming: true,
+      modelUsed: settings.model,
     };
 
     const newMessages = [...messagesUpToEdit, updatedUserMsg, assistantPlaceholder];
@@ -548,11 +611,12 @@ export default function App() {
   };
 
   const isLight = settings.theme === 'light';
+  const isPro = settings.model === 'gemini-3.8-flash';
 
   return (
     <div
       className={`flex h-screen w-screen overflow-hidden ${
-        isLight ? 'bg-slate-50 text-slate-900' : 'bg-[#0b0f17] text-slate-100'
+        isLight ? 'bg-slate-50 text-slate-900' : 'bg-[#040711] text-slate-100'
       }`}
     >
       {/* Sidebar Navigation */}
@@ -565,6 +629,11 @@ export default function App() {
         onRequestDeleteConversation={(id) => setConfirmDeleteId(id)}
         onRequestClearAll={() => setConfirmClearAllOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
+        onOpenAuth={() => setAuthModalOpen(true)}
+        onOpenProModal={() => setProModalOpen(true)}
+        onLogout={handleLogout}
+        user={authState.user}
+        isLoggedIn={authState.isLoggedIn}
         settings={settings}
         isOpenDesktop={sidebarOpenDesktop}
         onToggleDesktop={() => {
@@ -579,20 +648,20 @@ export default function App() {
 
       {/* Main Chat Workspace */}
       <main className="flex-1 flex flex-col h-full min-w-0 relative overflow-hidden">
-        {/* Top Header Bar */}
+        {/* Futuristic Top Header HUD */}
         <header
-          className={`h-14 px-3 sm:px-5 flex items-center justify-between border-b shrink-0 z-20 backdrop-blur-md transition-colors ${
+          className={`h-14 px-3 sm:px-6 flex items-center justify-between border-b shrink-0 z-20 backdrop-blur-xl transition-colors ${
             isLight
-              ? 'bg-white/80 border-slate-200'
-              : 'bg-[#0d121c]/80 border-slate-800/80'
+              ? 'bg-white/90 border-slate-200'
+              : 'bg-[#060a14]/90 border-slate-800/80 shadow-sm'
           }`}
         >
-          <div className="flex items-center gap-2.5 min-w-0">
+          <div className="flex items-center gap-3 min-w-0">
             {/* Mobile Menu Toggle */}
             <button
               onClick={() => setSidebarOpenMobile(true)}
-              className="md:hidden p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
-              aria-label="Open conversation menu"
+              className="md:hidden p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
+              aria-label="Open navigation"
             >
               <Menu className="w-5 h-5" />
             </button>
@@ -612,42 +681,126 @@ export default function App() {
               </button>
             )}
 
-            {/* Active Chat Title or Brand Title */}
+            {/* Title / Active Session */}
             <div className="flex items-center gap-2 truncate">
               <span className="font-bold text-sm tracking-tight text-white hidden sm:inline">
                 {currentConversation ? currentConversation.title : BRAND.name}
               </span>
-              <span className="font-bold text-sm tracking-tight text-white sm:hidden truncate max-w-[160px]">
+              <span className="font-bold text-sm tracking-tight text-white sm:hidden truncate max-w-[140px]">
                 {currentConversation ? currentConversation.title : BRAND.shortName}
               </span>
             </div>
           </div>
 
-          {/* Header Right Actions */}
+          {/* Header Controls: Free/Pro Model Switcher + Auth Chip + Settings */}
           <div className="flex items-center gap-2">
-            {/* Active Model Pill */}
-            <div
-              className={`hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${
-                isLight
-                  ? 'bg-slate-100 border-slate-200 text-slate-700'
-                  : 'bg-slate-900 border-slate-800 text-slate-300'
-              }`}
-            >
-              <Bot className="w-3.5 h-3.5 text-pink-400" />
-              <span>{settings.model === 'gemini-3.1-flash-lite' ? '3.1 Flash Lite' : '3.8 Flash'}</span>
+            {/* Model Selector Dropdown */}
+            <div className="relative">
+              <button
+                onClick={() => setModelDropdownOpen((prev) => !prev)}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-semibold border transition-all cursor-pointer ${
+                  isPro
+                    ? 'bg-amber-500/15 border-amber-500/40 text-amber-300 hover:bg-amber-500/25 shadow-sm shadow-amber-500/10'
+                    : 'bg-slate-900 border-slate-800 text-slate-200 hover:border-slate-700'
+                }`}
+                title="Switch AI Engine"
+              >
+                {isPro ? (
+                  <Zap className="w-3.5 h-3.5 text-amber-400 fill-current" />
+                ) : (
+                  <Bot className="w-3.5 h-3.5 text-lime-400" />
+                )}
+                <span>{isPro ? 'Gemini 3.8 Flash PRO' : 'Gemini 3.1 Flash Lite'}</span>
+                <ChevronDown className="w-3.5 h-3.5 opacity-60 ml-0.5" />
+              </button>
+
+              {/* Model Dropdown Menu */}
+              {modelDropdownOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-30"
+                    onClick={() => setModelDropdownOpen(false)}
+                  />
+                  <div className="absolute right-0 top-full mt-2 w-64 rounded-2xl bg-slate-950/95 border border-slate-800 shadow-2xl p-2 z-40 animate-in fade-in zoom-in-95 backdrop-blur-xl">
+                    <div className="text-[10px] font-mono uppercase font-bold text-slate-500 px-2 py-1 tracking-wider">
+                      Select Neural Model
+                    </div>
+
+                    {/* Free Model */}
+                    <button
+                      onClick={() => handleSelectModel('gemini-3.1-flash-lite')}
+                      className={`w-full text-left p-2 rounded-xl text-xs flex items-center justify-between transition-colors cursor-pointer ${
+                        !isPro ? 'bg-slate-800/80 text-white font-medium' : 'text-slate-300 hover:bg-slate-900'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Bot className="w-4 h-4 text-lime-400" />
+                        <div>
+                          <div className="font-semibold text-white">Gemini 3.1 Flash Lite</div>
+                          <div className="text-[10px] text-slate-400">Instant speed • Free for all</div>
+                        </div>
+                      </div>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-lime-500/20 text-lime-300 border border-lime-500/30 font-mono font-bold">
+                        FREE
+                      </span>
+                    </button>
+
+                    {/* Pro Model */}
+                    <button
+                      onClick={() => handleSelectModel('gemini-3.8-flash')}
+                      className={`w-full text-left p-2 rounded-xl text-xs flex items-center justify-between transition-colors mt-1 cursor-pointer ${
+                        isPro ? 'bg-amber-950/60 border border-amber-500/40 text-white font-medium' : 'text-slate-300 hover:bg-slate-900'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        <Zap className="w-4 h-4 text-amber-400 fill-current" />
+                        <div>
+                          <div className="font-semibold text-amber-300">Gemini 3.8 Flash Neural</div>
+                          <div className="text-[10px] text-slate-400">Deep reasoning & coding</div>
+                        </div>
+                      </div>
+                      <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 font-mono font-bold">
+                        PRO ✨
+                      </span>
+                    </button>
+                  </div>
+                </>
+              )}
             </div>
 
-            {/* New Chat shortcut in header */}
-            <button
-              onClick={handleNewChat}
-              className="p-1.5 sm:px-3 sm:py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-200 text-xs font-medium flex items-center gap-1.5 border border-slate-700/60 transition-all cursor-pointer"
-              title="Start New Chat"
-            >
-              <Plus className="w-4 h-4 text-pink-400" />
-              <span className="hidden sm:inline">New Chat</span>
-            </button>
+            {/* Auth Pill: Guest vs Logged In */}
+            {authState.isLoggedIn && authState.user ? (
+              <div
+                onClick={() => setAuthModalOpen(true)}
+                className="hidden sm:flex items-center gap-2 px-2.5 py-1 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-200 cursor-pointer hover:border-slate-700"
+                title="Account Profile"
+              >
+                <div className="w-5 h-5 rounded-md bg-gradient-to-tr from-pink-500 to-orange-400 text-slate-950 font-bold text-[10px] flex items-center justify-center">
+                  {authState.user.name.charAt(0).toUpperCase()}
+                </div>
+                <span className="font-semibold text-xs truncate max-w-[100px]">{authState.user.name}</span>
+                <span
+                  className={`text-[9px] font-mono px-1 rounded font-bold ${
+                    authState.user.tier === 'pro'
+                      ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                      : 'bg-slate-800 text-slate-400'
+                  }`}
+                >
+                  {authState.user.tier.toUpperCase()}
+                </span>
+              </div>
+            ) : (
+              <button
+                onClick={() => setAuthModalOpen(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-pink-500/15 hover:bg-pink-500/25 border border-pink-500/30 text-pink-300 text-xs font-semibold transition-all cursor-pointer shadow-sm shadow-pink-500/10"
+              >
+                <LogIn className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">Sign In / Join</span>
+                <span className="sm:hidden">Join</span>
+              </button>
+            )}
 
-            {/* Quick Settings shortcut */}
+            {/* Settings shortcut */}
             <button
               onClick={() => setSettingsOpen(true)}
               className="p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-colors cursor-pointer"
@@ -665,12 +818,16 @@ export default function App() {
           onScroll={handleScroll}
           className="flex-1 overflow-y-auto overflow-x-hidden relative flex flex-col"
         >
-          {/* Subtle radiant background aura */}
-          <div className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 w-[600px] h-[350px] bg-gradient-to-br from-pink-500/10 via-orange-500/5 to-lime-400/10 rounded-full blur-3xl opacity-60" />
+          {/* Subtle Cyberpunk Ambient Glow */}
+          <div className="pointer-events-none absolute -top-40 left-1/2 -translate-x-1/2 w-[650px] h-[380px] bg-gradient-to-br from-pink-500/15 via-orange-500/10 to-lime-400/10 rounded-full blur-3xl opacity-50" />
 
-          {/* Welcome Screen when no messages in conversation */}
+          {/* Welcome Screen or Message Feed */}
           {!currentConversation || currentConversation.messages.length === 0 ? (
-            <WelcomeScreen onSelectSuggestion={(prompt) => handleSendMessage(prompt)} />
+            <WelcomeScreen
+              onSelectSuggestion={(prompt) => handleSendMessage(prompt)}
+              activeModel={settings.model}
+              onOpenProModal={() => setProModalOpen(true)}
+            />
           ) : (
             <div className="py-6 space-y-1 w-full max-w-4xl mx-auto flex-1">
               {currentConversation.messages.map((message, index) => {
@@ -694,15 +851,15 @@ export default function App() {
             </div>
           )}
 
-          {/* Scroll to bottom floating button */}
-          {showScrollBottom && (
+          {/* Floating Scroll to Bottom button - only shown during active chat */}
+          {showScrollBottom && currentConversation && currentConversation.messages.length > 0 && (
             <button
               onClick={() => scrollToBottom('smooth')}
-              className="sticky bottom-4 left-1/2 -translate-x-1/2 p-2.5 rounded-full bg-slate-900 border border-slate-700 shadow-2xl text-slate-200 hover:text-white hover:border-pink-500 transition-all duration-200 cursor-pointer flex items-center gap-1.5 text-xs font-medium z-30"
+              className="absolute bottom-6 right-6 p-2.5 rounded-full bg-slate-900/90 hover:bg-slate-800 border border-slate-700/80 hover:border-pink-500 shadow-2xl text-slate-200 hover:text-white transition-all duration-200 cursor-pointer flex items-center gap-1.5 text-xs font-semibold z-30 backdrop-blur-md"
               aria-label="Scroll to bottom"
+              title="Scroll to latest message"
             >
               <ArrowDown className="w-4 h-4 text-pink-400" />
-              <span>Scroll to bottom</span>
             </button>
           )}
         </div>
@@ -714,8 +871,27 @@ export default function App() {
           onSend={(customText) => handleSendMessage(customText)}
           onStop={handleStopGeneration}
           isGenerating={isGenerating}
+          activeModel={settings.model}
+          onOpenModelSelector={() => setModelDropdownOpen(true)}
         />
       </main>
+
+      {/* Auth Modal (Login / Signup / Stay Logged Out) */}
+      <AuthModal
+        isOpen={authModalOpen}
+        onClose={() => setAuthModalOpen(false)}
+        onLoginSuccess={handleLoginSuccess}
+        onStayLoggedOut={handleStayLoggedOut}
+      />
+
+      {/* Pro Tier Upgrade / Unlock Modal */}
+      <ProModal
+        isOpen={proModalOpen}
+        onClose={() => setProModalOpen(false)}
+        onActivatePro={handleActivatePro}
+        onOpenAuth={() => setAuthModalOpen(true)}
+        isLoggedIn={authState.isLoggedIn}
+      />
 
       {/* Settings Modal */}
       <SettingsModal
@@ -732,8 +908,8 @@ export default function App() {
         onClose={() => setConfirmDeleteId(null)}
         onConfirm={handleConfirmDeleteConversation}
         title="Delete Conversation"
-        message="Are you sure you want to delete this conversation? This action cannot be undone."
-        confirmLabel="Delete"
+        message="Are you sure you want to delete this conversation memory? This action cannot be undone."
+        confirmLabel="Delete Memory"
         isDestructive={true}
       />
 
@@ -742,9 +918,9 @@ export default function App() {
         isOpen={confirmClearAllOpen}
         onClose={() => setConfirmClearAllOpen(false)}
         onConfirm={handleConfirmClearAll}
-        title="Clear All Chat History"
+        title="Wipe Neural Memories"
         message="Are you sure you want to permanently delete all conversations from your browser LocalStorage?"
-        confirmLabel="Clear All"
+        confirmLabel="Wipe All History"
         isDestructive={true}
       />
 

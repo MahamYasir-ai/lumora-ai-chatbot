@@ -154,29 +154,40 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
                 Active Gemini Model
               </label>
               <div className="space-y-2">
-                {BRAND.models.map((model) => (
-                  <button
-                    key={model.id}
-                    type="button"
-                    onClick={() => setTempSettings((prev) => ({ ...prev, model: model.id }))}
-                    className={`w-full text-left p-3 rounded-xl border transition-all cursor-pointer ${
-                      tempSettings.model === model.id
-                        ? 'bg-slate-800 border-pink-500/80 shadow-md shadow-pink-500/10'
-                        : 'bg-slate-900/50 border-slate-800 hover:border-slate-700'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <div className="flex items-center gap-2">
-                        <Bot className="w-4 h-4 text-pink-400" />
-                        <span className="text-sm font-semibold text-white">{model.name}</span>
+                {BRAND.models.map((model) => {
+                  const isProModel = model.id === 'gemini-3.8-flash';
+                  return (
+                    <button
+                      key={model.id}
+                      type="button"
+                      onClick={() => setTempSettings((prev) => ({ ...prev, model: model.id }))}
+                      className={`w-full text-left p-3 rounded-xl border transition-all cursor-pointer ${
+                        tempSettings.model === model.id
+                          ? isProModel
+                            ? 'bg-amber-950/40 border-amber-500/80 shadow-md shadow-amber-500/10'
+                            : 'bg-slate-800 border-pink-500/80 shadow-md shadow-pink-500/10'
+                          : 'bg-slate-900/50 border-slate-800 hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          <Bot className={`w-4 h-4 ${isProModel ? 'text-amber-400' : 'text-lime-400'}`} />
+                          <span className="text-sm font-semibold text-white">{model.name}</span>
+                        </div>
+                        <span
+                          className={`text-[9px] uppercase font-bold px-2 py-0.5 rounded-full border ${
+                            isProModel
+                              ? 'bg-amber-500/20 text-amber-300 border-amber-500/40 font-mono'
+                              : 'bg-lime-500/20 text-lime-300 border-lime-500/30 font-mono'
+                          }`}
+                        >
+                          {model.badge}
+                        </span>
                       </div>
-                      <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-300 border border-slate-700">
-                        {model.badge}
-                      </span>
-                    </div>
-                    <p className="text-xs text-slate-400">{model.description}</p>
-                  </button>
-                ))}
+                      <p className="text-xs text-slate-400">{model.description}</p>
+                    </button>
+                  );
+                })}
               </div>
             </div>
 

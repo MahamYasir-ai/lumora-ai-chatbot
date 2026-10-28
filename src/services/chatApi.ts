@@ -37,6 +37,12 @@ export async function sendChatStream({
     });
 
     if (!response.ok) {
+      if (response.status === 404) {
+        onError(
+          'API Route 404 Not Found: If running on Vercel, please ensure GEMINI_API_KEY is added under Project Settings > Environment Variables and redeploy so /api/chat.ts is active.'
+        );
+        return;
+      }
       const errorJson = await response.json().catch(() => ({}));
       const message = errorJson.error || `Server responded with status ${response.status}`;
       onError(message);

@@ -7,6 +7,7 @@ export interface ChatMessage {
   timestamp: number;
   isStreaming?: boolean;
   error?: string;
+  modelUsed?: string;
 }
 
 export interface Conversation {
@@ -37,5 +38,9 @@ export interface ToastMessage {
 export interface AIModel {
   id: string;
   name: string;
+  shortName: string;
+  tier: 'free' | 'pro';
+  badge: string;
   description: string;
 }
+
